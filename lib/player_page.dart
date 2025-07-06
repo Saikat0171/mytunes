@@ -102,32 +102,57 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget build(BuildContext context) {
     final song = widget.songs[_currentIndex];
     return Scaffold(
-      backgroundColor: Colors.deepPurple[50],
+      backgroundColor: const Color(0xFF121212),
       appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: Colors.black,
         title: const Text('Now Playing', style: TextStyle(color: Colors.white)),
         centerTitle: true,
         elevation: 0,
       ),
       body: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.music_note, size: 120, color: Colors.deepPurple),
+            // Album art icon
+            Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                color: Colors.grey[800],
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(
+                Icons.music_note,
+                size: 120,
+                color: Colors.white,
+              ),
+            ),
             const SizedBox(height: 32),
+
+            // Song title
             Text(
               song.title,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
               textAlign: TextAlign.center,
             ),
+
             const SizedBox(height: 8),
+
+            // Artist name
             Text(
               song.artist ?? "Unknown Artist",
-              style: const TextStyle(fontSize: 16, color: Colors.black54),
+              style: const TextStyle(fontSize: 16, color: Colors.grey),
               textAlign: TextAlign.center,
             ),
+
             const SizedBox(height: 32),
+
+            // Progress bar
             Slider(
               min: 0,
               max: _duration.inMilliseconds.toDouble().clamp(
@@ -137,23 +162,38 @@ class _PlayerPageState extends State<PlayerPage> {
               value: _position.inMilliseconds
                   .clamp(0, _duration.inMilliseconds)
                   .toDouble(),
-              onChanged: (value) => _seekTo(value),
-              activeColor: Colors.deepPurple,
-              inactiveColor: Colors.deepPurple[100],
+              onChanged: _seekTo,
+              activeColor: Colors.greenAccent,
+              inactiveColor: Colors.grey[700],
             ),
+
+            // Time indicators
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(_formatDuration(_position)),
-                Text(_formatDuration(_duration)),
+                Text(
+                  _formatDuration(_position),
+                  style: const TextStyle(color: Colors.grey),
+                ),
+                Text(
+                  _formatDuration(_duration),
+                  style: const TextStyle(color: Colors.grey),
+                ),
               ],
             ),
-            const SizedBox(height: 16),
+
+            const SizedBox(height: 24),
+
+            // Playback controls
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.skip_previous, size: 36),
+                  icon: const Icon(
+                    Icons.skip_previous,
+                    size: 36,
+                    color: Colors.white,
+                  ),
                   onPressed: _currentIndex > 0
                       ? () => _playSong(_currentIndex - 1)
                       : null,
@@ -164,7 +204,7 @@ class _PlayerPageState extends State<PlayerPage> {
                         ? Icons.pause_circle_filled
                         : Icons.play_circle_filled,
                     size: 64,
-                    color: Colors.deepPurple,
+                    color: Colors.greenAccent,
                   ),
                   onPressed: () {
                     if (_isPlaying) {
@@ -175,7 +215,11 @@ class _PlayerPageState extends State<PlayerPage> {
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.skip_next, size: 36),
+                  icon: const Icon(
+                    Icons.skip_next,
+                    size: 36,
+                    color: Colors.white,
+                  ),
                   onPressed: _currentIndex < widget.songs.length - 1
                       ? () => _playSong(_currentIndex + 1)
                       : null,

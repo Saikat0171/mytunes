@@ -9,9 +9,6 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
-    // Use logging framework instead of print
-    // You can also write to a file or remote server here if needed
-    // Example: log to console
     debugPrint('${record.level.name}: ${record.time}: ${record.message}');
   });
   runApp(const MyApp());
@@ -19,13 +16,20 @@ void main() {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'MyTunes',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF121212),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.greenAccent,
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
+        textTheme: const TextTheme(bodyMedium: TextStyle(color: Colors.white)),
       ),
       home: const MusicPlayerPage(),
       debugShowCheckedModeBanner: false,
@@ -51,6 +55,7 @@ class SongData {
 
 class MusicPlayerPage extends StatefulWidget {
   const MusicPlayerPage({super.key});
+
   @override
   State<MusicPlayerPage> createState() => _MusicPlayerPageState();
 }
@@ -58,8 +63,12 @@ class MusicPlayerPage extends StatefulWidget {
 class _MusicPlayerPageState extends State<MusicPlayerPage> {
   final OnAudioQuery _audioQuery = OnAudioQuery();
   final _logger = Logger('MyTunes');
+
   List<SongData> _songs = [];
+  List<SongData> _filteredSongs = [];
   bool _loading = true;
+  String _searchQuery = '';
+  String _sortOption = 'A-Z';
 
   @override
   void initState() {
@@ -67,16 +76,50 @@ class _MusicPlayerPageState extends State<MusicPlayerPage> {
     _fetchSongs();
   }
 
+  void _applyFilters() {
+    List<SongData> filtered = _songs.where((song) {
+      return song.title.toLowerCase().contains(_searchQuery.toLowerCase());
+    }).toList();
+
+    switch (_sortOption) {
+      case 'A-Z':
+        filtered.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
+        break;
+      case 'Z-A':
+        filtered.sort(
+          (a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()),
+        );
+        break;
+      case 'Newest First':
+        filtered = filtered.reversed.toList();
+        break;
+      case 'Oldest First':
+        break;
+    }
+
+    setState(() {
+      _filteredSongs = filtered;
+    });
+  }
+
   Future<void> _fetchSongs() async {
     try {
       if (Platform.isAndroid) {
         await _requestPermissionAndFetchAndroidSongs();
       } else if (Platform.isLinux) {
-        await _scanLinuxSongs();
+        await _scanSongs(['/home']);
       } else if (Platform.isWindows) {
-        await _scanWindowsSongs();
+        await _scanSongs([
+          '${Platform.environment['USERPROFILE']}\\Music',
+          '${Platform.environment['USERPROFILE']}\\Downloads',
+        ]);
       } else if (Platform.isMacOS) {
-        await _scanMacOSSongs();
+        await _scanSongs([
+          '${Platform.environment['HOME']}/Music',
+          '${Platform.environment['HOME']}/Downloads',
+        ]);
       }
     } catch (e, stack) {
       _logger.severe('Error fetching songs: $e\n$stack');
@@ -86,7 +129,10 @@ class _MusicPlayerPageState extends State<MusicPlayerPage> {
         ).showSnackBar(SnackBar(content: Text('Error loading songs: $e')));
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        _applyFilters();
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -100,90 +146,38 @@ class _MusicPlayerPageState extends State<MusicPlayerPage> {
         uriType: UriType.EXTERNAL,
         ignoreCase: true,
       );
+      final fetchedSongs = songs
+          .where((s) => s.uri != null)
+          .map(
+            (s) => SongData(
+              title: s.title,
+              artist: s.artist,
+              uri: s.uri!,
+              id: s.id,
+              album: s.album,
+            ),
+          )
+          .toList();
+
       setState(() {
-        _songs = songs
-            .where((s) => s.uri != null)
-            .map(
-              (s) => SongData(
-                title: s.title,
-                artist: s.artist,
-                uri: s.uri!,
-                id: s.id,
-                album: s.album,
-              ),
-            )
-            .toList();
+        _songs = fetchedSongs;
+        _applyFilters();
       });
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Storage or audio permission is required to list songs.',
-            ),
-          ),
+          const SnackBar(content: Text('Permission required to load songs.')),
         );
       }
     }
   }
 
-  Future<void> _scanLinuxSongs() async {
-    final home = Platform.environment['HOME'] ?? '/home';
-    final musicDirs = [
-      Directory('$home/Music'),
-      Directory('$home/Downloads'),
-      Directory('$home/Downloads/Music'),
-    ];
+  Future<void> _scanSongs(List<String> paths) async {
     final audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'];
     final List<SongData> foundSongs = [];
-    for (final dir in musicDirs) {
-      _logger.info('Scanning directory: ${dir.path}');
-      if (await dir.exists()) {
-        try {
-          await for (final entity in dir.list(
-            recursive: true,
-            followLinks: false,
-          )) {
-            if (entity is File) {
-              final ext = entity.path.split('.').last.toLowerCase();
-              if (audioExtensions.contains(ext)) {
-                _logger.fine('Found audio file: ${entity.path}');
-                foundSongs.add(
-                  SongData(
-                    title: entity.uri.pathSegments.last,
-                    artist: null,
-                    uri: entity.path,
-                    id: null,
-                  ),
-                );
-              }
-            }
-          }
-        } catch (e) {
-          _logger.severe('Error scanning ${dir.path}: $e');
-          continue;
-        }
-      } else {
-        _logger.warning('Directory does not exist: ${dir.path}');
-      }
-    }
-    setState(() {
-      _songs = foundSongs;
-    });
-  }
 
-  Future<void> _scanWindowsSongs() async {
-    final userProfile =
-        Platform.environment['USERPROFILE'] ?? 'C:\\Users\\Default';
-    final musicDirs = [
-      Directory('$userProfile\\Music'),
-      Directory('$userProfile\\Downloads'),
-      Directory('$userProfile\\Downloads\\Music'),
-    ];
-    final audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'];
-    final List<SongData> foundSongs = [];
-    for (final dir in musicDirs) {
-      _logger.info('Scanning directory: ${dir.path}');
+    for (final path in paths) {
+      final dir = Directory(path);
       if (await dir.exists()) {
         try {
           await for (final entity in dir.list(
@@ -193,7 +187,6 @@ class _MusicPlayerPageState extends State<MusicPlayerPage> {
             if (entity is File) {
               final ext = entity.path.split('.').last.toLowerCase();
               if (audioExtensions.contains(ext)) {
-                _logger.fine('Found audio file: ${entity.path}');
                 foundSongs.add(
                   SongData(
                     title: entity.uri.pathSegments.last,
@@ -206,101 +199,154 @@ class _MusicPlayerPageState extends State<MusicPlayerPage> {
             }
           }
         } catch (e) {
-          _logger.severe('Error scanning ${dir.path}: $e');
-          continue;
+          _logger.severe('Error scanning $path: $e');
         }
-      } else {
-        _logger.warning('Directory does not exist: ${dir.path}');
       }
     }
-    setState(() {
-      _songs = foundSongs;
-    });
-  }
 
-  Future<void> _scanMacOSSongs() async {
-    final home = Platform.environment['HOME'] ?? '/Users/Shared';
-    final musicDirs = [
-      Directory('$home/Music'),
-      Directory('$home/Downloads'),
-      Directory('$home/Downloads/Music'),
-    ];
-    final audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'];
-    final List<SongData> foundSongs = [];
-    for (final dir in musicDirs) {
-      _logger.info('Scanning directory: ${dir.path}');
-      if (await dir.exists()) {
-        try {
-          await for (final entity in dir.list(
-            recursive: true,
-            followLinks: false,
-          )) {
-            if (entity is File) {
-              final ext = entity.path.split('.').last.toLowerCase();
-              if (audioExtensions.contains(ext)) {
-                _logger.fine('Found audio file: ${entity.path}');
-                foundSongs.add(
-                  SongData(
-                    title: entity.uri.pathSegments.last,
-                    artist: null,
-                    uri: entity.path,
-                    id: null,
-                  ),
-                );
-              }
-            }
-          }
-        } catch (e) {
-          _logger.severe('Error scanning ${dir.path}: $e');
-          continue;
-        }
-      } else {
-        _logger.warning('Directory does not exist: ${dir.path}');
-      }
-    }
     setState(() {
       _songs = foundSongs;
+      _applyFilters();
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.deepPurple[50],
       appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
-        title: const Text('MyTunes', style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.black,
+        title: const Text(
+          'MyTunes',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         centerTitle: true,
         elevation: 0,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: Colors.greenAccent),
+            )
           : Column(
               children: [
+                // Search bar
+                Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: TextField(
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Search songs',
+                      hintStyle: const TextStyle(color: Colors.grey),
+                      filled: true,
+                      fillColor: const Color(0xFF1E1E1E),
+                      prefixIcon: const Icon(Icons.search, color: Colors.white),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(30),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (query) {
+                      setState(() {
+                        _searchQuery = query;
+                        _applyFilters();
+                      });
+                    },
+                  ),
+                ),
+
+                // Sort dropdown
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Sort by',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      DropdownButton<String>(
+                        dropdownColor: const Color(0xFF1E1E1E),
+                        value: _sortOption,
+                        icon: const Icon(
+                          Icons.arrow_drop_down,
+                          color: Colors.white,
+                        ),
+                        underline: Container(),
+                        style: const TextStyle(color: Colors.white),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _sortOption = value;
+                              _applyFilters();
+                            });
+                          }
+                        },
+                        items: const [
+                          DropdownMenuItem(value: 'A-Z', child: Text('A-Z')),
+                          DropdownMenuItem(value: 'Z-A', child: Text('Z-A')),
+                          DropdownMenuItem(
+                            value: 'Newest First',
+                            child: Text('Newest'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Oldest First',
+                            child: Text('Oldest'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Song list
                 Expanded(
-                  child: _songs.isEmpty
-                      ? const Center(child: Text('No songs found.'))
+                  child: _filteredSongs.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'No songs found.',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        )
                       : ListView.builder(
-                          itemCount: _songs.length,
+                          itemCount: _filteredSongs.length,
                           itemBuilder: (context, index) {
-                            final song = _songs[index];
+                            final song = _filteredSongs[index];
                             return ListTile(
-                              leading: const Icon(
-                                Icons.music_note,
-                                color: Colors.deepPurple,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              leading: Container(
+                                width: 50,
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[800],
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Icon(
+                                  Icons.music_note,
+                                  color: Colors.white,
+                                ),
                               ),
                               title: Text(
                                 song.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
                               ),
-                              subtitle: Text(song.artist ?? "Unknown Artist"),
+                              subtitle: Text(
+                                song.artist ?? 'Unknown Artist',
+                                style: const TextStyle(color: Colors.grey),
+                              ),
                               onTap: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                     builder: (_) => PlayerPage(
-                                      songs: _songs,
+                                      songs: _filteredSongs,
                                       initialIndex: index,
                                     ),
                                   ),
