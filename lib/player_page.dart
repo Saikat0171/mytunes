@@ -1,7 +1,7 @@
-import 'dart:io' show File, Platform;
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
+import 'package:just_audio/just_audio.dart';
 import 'main.dart'; // Import SongData
 
 class PlayerPage extends StatefulWidget {
@@ -23,7 +23,7 @@ class _PlayerPageState extends State<PlayerPage> {
   final _logger = Logger('MyTunesPlayer');
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
-  PlayerState? _playerState;
+  bool _isPlaying = false;
 
   @override
   void initState() {
@@ -32,9 +32,9 @@ class _PlayerPageState extends State<PlayerPage> {
     _currentIndex = widget.initialIndex;
     _playSong(_currentIndex);
 
-    _audioPlayer.playerStateStream.listen((state) {
+    _audioPlayer.positionStream.listen((p) {
       setState(() {
-        _playerState = state;
+        _position = p;
       });
     });
     _audioPlayer.durationStream.listen((d) {
@@ -42,10 +42,17 @@ class _PlayerPageState extends State<PlayerPage> {
         _duration = d ?? Duration.zero;
       });
     });
-    _audioPlayer.positionStream.listen((p) {
+    _audioPlayer.playerStateStream.listen((state) {
       setState(() {
-        _position = p;
+        _isPlaying = state.playing;
       });
+    });
+    _audioPlayer.processingStateStream.listen((state) {
+      if (state == ProcessingState.completed) {
+        if (_currentIndex < widget.songs.length - 1) {
+          _playSong(_currentIndex + 1);
+        }
+      }
     });
   }
 
@@ -54,19 +61,10 @@ class _PlayerPageState extends State<PlayerPage> {
     _logger.info('Trying to play: ${song.uri}');
     try {
       await _audioPlayer.stop();
-      if (Platform.isLinux) {
-        if (!await File(song.uri).exists()) {
-          _logger.warning('File does not exist: ${song.uri}');
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('File does not exist: ${song.title}')),
-          );
-          return;
-        }
+      if (Platform.isAndroid || Platform.isIOS) {
+        await _audioPlayer.setUrl(song.uri);
+      } else {
         await _audioPlayer.setFilePath(song.uri);
-      } else if (Platform.isAndroid) {
-        _logger.info('Android song URI: ${song.uri}');
-        await _audioPlayer.setAudioSource(AudioSource.uri(Uri.parse(song.uri)));
       }
       await _audioPlayer.play();
       setState(() {
@@ -162,14 +160,14 @@ class _PlayerPageState extends State<PlayerPage> {
                 ),
                 IconButton(
                   icon: Icon(
-                    _playerState?.playing == true
+                    _isPlaying
                         ? Icons.pause_circle_filled
                         : Icons.play_circle_filled,
                     size: 64,
                     color: Colors.deepPurple,
                   ),
                   onPressed: () {
-                    if (_playerState?.playing == true) {
+                    if (_isPlaying) {
                       _audioPlayer.pause();
                     } else {
                       _audioPlayer.play();
